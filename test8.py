@@ -159,7 +159,7 @@ def extract_and_chunk_pdf(file_path: str, company_ticker: str, company_name: str
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=CHUNK_SIZE,
             chunk_overlap=CHUNK_OVERLAP,
-            separators=["\n\n", "\n", " ", ""]
+            separators=["\n\n\n","\n\n", "\n", " ", ""]
         )
         
         # Create chunks
@@ -174,14 +174,14 @@ def extract_and_chunk_pdf(file_path: str, company_ticker: str, company_name: str
                     chunk_metadata = {
                         "company_ticker": company_ticker,
                         "company_name": company_name,
+                        "stock_exchange":"ADX",
                         "report_type": report_type,
                         "report_date": report_date,
                         "page_number": page_num + 1,
                         "chunk_serial": chunk_serial,
-                        "chunk_id": f"{company_ticker}_{report_date}_{report_type}_chunk_{chunk_serial}",
                         "source_file": os.path.basename(file_path),
                         "chunk_size": len(chunk_text),
-                        "created_at": datetime.utcnow().isoformat()
+                        "created_at": datetime.now().isoformat()
                     }
                     
                     chunk_doc = Document(
@@ -207,7 +207,6 @@ def store_chunks_in_qdrant(vector_store, chunks: List[Document], mongodb_doc_id:
         # Add MongoDB document ID to chunk metadata
         for chunk in chunks:
             chunk.metadata["mongodb_doc_id"] = str(mongodb_doc_id)
-            chunk.metadata["vector_id"] = str(uuid.uuid4())
         
         # Store chunks in Qdrant
         vector_store.add_documents(chunks)
@@ -236,6 +235,7 @@ def store_in_mongodb(collection, file_path: str, company_name: str, company_tick
             "file_name_base64": base64.b64encode(os.path.basename(file_path).encode()).decode('utf-8'),
             "company_name": company_name,
             "company_ticker": company_ticker,
+            "stock_exchange":"ADX",
             "report_type": report_type,
             "report_date": report_date,
             "content_pages": content_pages,  # List of base64 strings, one per page
@@ -323,7 +323,7 @@ def get_all_companies(driver, wait):
         # Extract all company symbols and names
         companies = []
         symbol_elements = driver.find_elements(By.XPATH, "//div[@data-column-id='Symbol']//a")
-        name_elements = driver.find_elements(By.XPATH, "//div[@data-column-id='Name']")
+        name_elements = driver.find_elements(By.XPATH, "//div[@data-column-id='Name']/div")
         
         for i, symbol_el in enumerate(symbol_elements):
             ticker = symbol_el.text.strip()
@@ -344,7 +344,45 @@ def get_all_companies(driver, wait):
     except Exception as e:
         print(f"✗ Error getting companies: {str(e)}")
         return []
+    
+# def scroll_to_load_all_companies(driver):
+#     """Scroll page to table, then scroll the table to load all companies"""
+#     print("📜 Scrolling to load all companies...")
 
+#     # Selector for the scrollable table
+#     container_selector = ".position-relative.datatable-wrapper"
+
+#     # Scroll page to the container
+#     scroll_into_view_script = """
+#         const el = document.querySelector(arguments[0]);
+#         if (el) el.scrollIntoView({behavior: 'smooth', block: 'center'});
+#     """
+#     driver.execute_script(scroll_into_view_script, container_selector)
+#     time.sleep(3)  # Let the page catch up
+
+#     # Scroll inside the container
+#     scroll_script = """
+#         const container = document.querySelector(arguments[0]);
+#         const previousScrollTop = container.scrollTop;
+#         container.scrollTop += 500;
+#         return [container.scrollTop, container.scrollHeight];
+#     """
+
+#     scroll_attempts = 0
+#     max_attempts = 25
+#     last_position = -1
+
+#     while scroll_attempts < max_attempts:
+#         time.sleep(1.5)
+#         scrollTop, scrollHeight = driver.execute_script(scroll_script, container_selector)
+
+#         if scrollTop == last_position:
+#             break
+
+#         last_position = scrollTop
+#         scroll_attempts += 1
+
+#     print(f"✓ Finished scrolling after {scroll_attempts} attempts")
 def scroll_to_load_all_companies(driver):
     """Scroll to bottom to load all companies"""
     print("📜 Scrolling to load all companies...")
@@ -459,7 +497,8 @@ def download_reports_for_company(driver, wait, company_info, collection, vector_
                 report_date_clean = report_date.replace(" ", "_").replace("/", "-")
                 
                 # Create descriptive filename
-                filename = f"{ticker}_{report_date_clean}_{clean_filename(report_type)}.pdf"
+                #filename = f"{ticker}_{report_date_clean}_{clean_filename(report_type)}.pdf"
+                filename = f"{link[-7:]}.pdf"
                 file_path = os.path.join(company_folder, filename)
                 
                 print(f"   [{idx+1}] Processing: {filename}")
@@ -530,7 +569,7 @@ def main():
     try:
         # Setup MongoDB
         collection = setup_mongodb()
-        if not collection:
+        if collection is None:
             print("Cannot proceed without MongoDB connection")
             return
         
